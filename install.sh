@@ -304,7 +304,7 @@ pull_ollama_model() {
     local attempt=0
     
     while [[ $attempt -lt $max_attempts ]]; do
-        if docker exec ollama curl -s http://localhost:11434/api/tags &> /dev/null; then
+        if docker exec ollama ollama list &> /dev/null; then
             break
         fi
         attempt=$((attempt + 1))
