@@ -2,8 +2,11 @@ FROM dustynv/faster-whisper:r36.4.0-cu128-24.04
 
 WORKDIR /app
 
-# Install FastAPI and uvicorn (use standard PyPI as fallback)
-RUN pip3 install --no-cache-dir --extra-index-url https://pypi.org/simple fastapi uvicorn python-multipart
+# Ensure pip uses public PyPI (the base image overrides it)
+ENV PIP_INDEX_URL=https://pypi.org/simple
+
+# Install FastAPI, uvicorn, and Gradio
+RUN pip3 install --no-cache-dir fastapi uvicorn python-multipart gradio
 
 # Copy server code
 COPY server.py /app/server.py

@@ -71,6 +71,7 @@ services:
       - WHISPER_DEVICE=cuda
       - WHISPER_COMPUTE_TYPE=float16
       - PORT=9000
+      - GRADIO_PORT=7860
     networks:
       edge_macvlan:
         ipv4_address: ${WHISPER_IP:-192.168.1.242}
@@ -88,6 +89,40 @@ services:
       timeout: 10s
       retries: 3
       start_period: 180s
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+
+  # ---------------------------------------------------------------------------
+  # Ollama Chat UI - Gradio frontend with Postgres-backed memory
+  # ---------------------------------------------------------------------------
+  ollama_ui:
+    build:
+      context: ./ollama-ui
+      dockerfile: Dockerfile
+    image: jetson-ollama-ui:latest
+    container_name: ollama-ui
+    restart: unless-stopped
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
+      - OLLAMA_UI_PORT=${OLLAMA_UI_PORT:-7861}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    depends_on:
+      - ollama
+    networks:
+      edge_macvlan:
+        ipv4_address: ${OLLAMA_UI_IP:-192.168.1.235}
+      bridge_net:
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${OLLAMA_UI_PORT:-7861} || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
 

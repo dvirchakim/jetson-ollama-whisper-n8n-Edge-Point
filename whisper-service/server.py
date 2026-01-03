@@ -14,6 +14,8 @@ from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
+import gradio as gr
+from gradio.routes import mount_gradio_app
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -74,6 +76,36 @@ async def health():
     return {"status": "healthy"}
 
 
+def run_transcription_from_path(
+    file_path: str,
+    language: Optional[str] = None,
+    task: str = "transcribe",
+    word_timestamps: bool = False
+):
+    """Run transcription using an existing file path."""
+    whisper_model = get_model()
+    segments, info = whisper_model.transcribe(
+        file_path,
+        language=language,
+        task=task,
+        word_timestamps=word_timestamps,
+        beam_size=5
+    )
+    
+    segment_list = []
+    full_text = []
+    for segment in segments:
+        segment_list.append({
+            "start": segment.start,
+            "end": segment.end,
+            "text": segment.text.strip()
+        })
+        full_text.append(segment.text.strip())
+    
+    text = " ".join(full_text)
+    return text, info, segment_list
+
+
 async def _process_transcription(
     request: Request,
     audio_file: Optional[UploadFile] = None,
@@ -84,8 +116,6 @@ async def _process_transcription(
 ):
     """Internal transcription processing function."""
     try:
-        whisper_model = get_model()
-        
         # Detect content type and handle accordingly
         content_type = request.headers.get("content-type", "")
         
@@ -114,27 +144,12 @@ async def _process_transcription(
             tmp_path = tmp.name
         
         try:
-            # Transcribe
-            segments, info = whisper_model.transcribe(
+            text, info, segment_list = run_transcription_from_path(
                 tmp_path,
                 language=language,
                 task=task,
-                word_timestamps=word_timestamps,
-                beam_size=5
+                word_timestamps=word_timestamps
             )
-            
-            # Collect segments
-            segment_list = []
-            full_text = []
-            for segment in segments:
-                segment_list.append({
-                    "start": segment.start,
-                    "end": segment.end,
-                    "text": segment.text.strip()
-                })
-                full_text.append(segment.text.strip())
-            
-            text = " ".join(full_text)
             
             if output == "text":
                 return JSONResponse(content={"text": text})
@@ -153,6 +168,76 @@ async def _process_transcription(
     except Exception as e:
         logger.error(f"Transcription error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def build_gradio_app():
+    """Create Gradio UI for Whisper."""
+    language_choices = [
+        "",
+        "en", "es", "fr", "de", "it", "pt", "zh", "ja", "ko", "hi", "ar"
+    ]
+
+    def gradio_transcribe(audio, language, task, word_timestamps):
+        if not audio:
+            return "Please provide audio.", {}
+        lang = language or None
+        text, info, segments = run_transcription_from_path(
+            audio,
+            language=lang,
+            task=task,
+            word_timestamps=word_timestamps
+        )
+        metadata = {
+            "language": info.language,
+            "duration": info.duration,
+            "segments": segments
+        }
+        return text, metadata
+
+    with gr.Blocks(title="Jetson Whisper UI") as demo:
+        gr.Markdown(
+            "# Jetson Whisper UI\n"
+            "Upload or record audio to transcribe using the onboard faster-whisper model. "
+            "This UI talks to the same GPU-accelerated backend used by the API."
+        )
+        with gr.Row():
+            audio_input = gr.Audio(
+                sources=["upload", "microphone"],
+                type="filepath",
+                label="Audio Input"
+            )
+            with gr.Column():
+                language_input = gr.Dropdown(
+                    language_choices,
+                    value="",
+                    label="Language (optional)",
+                    info="Leave blank for auto-detect"
+                )
+                task_input = gr.Radio(
+                    ["transcribe", "translate"],
+                    value="transcribe",
+                    label="Task"
+                )
+                ts_input = gr.Checkbox(
+                    label="Word timestamps",
+                    value=False
+                )
+        run_button = gr.Button("Transcribe")
+        transcript_output = gr.Textbox(
+            label="Transcript",
+            lines=6
+        )
+        metadata_output = gr.JSON(
+            label="Metadata"
+        )
+
+        run_button.click(
+            gradio_transcribe,
+            inputs=[audio_input, language_input, task_input, ts_input],
+            outputs=[transcript_output, metadata_output]
+        )
+
+    return demo
 
 
 @app.post("/asr", response_model=TranscriptionResponse)
@@ -208,6 +293,10 @@ async def openai_compatible_transcribe(
         output=response_format or "json",
         word_timestamps=False
     )
+
+# Mount Gradio UI at /ui
+gradio_app = build_gradio_app()
+app = mount_gradio_app(app, gradio_app, path="/ui")
 
 
 if __name__ == "__main__":
