@@ -90,6 +90,43 @@ def fetch_history(session_id: str) -> List[Tuple[str, str, dict]]:
             return cur.fetchall()
 
 
+def get_all_sessions() -> List[Tuple[str, str, str]]:
+    """Get all unique sessions with their first message and timestamp."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT ON (session_id)
+                    session_id,
+                    content,
+                    created_at::text
+                FROM conversation_history
+                WHERE role = 'user'
+                ORDER BY session_id, created_at ASC
+                """
+            )
+            return cur.fetchall()
+
+
+def delete_session(session_id: str) -> None:
+    """Delete all messages from a specific session."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM conversation_history WHERE session_id = %s",
+                (session_id,)
+            )
+    logger.info(f"Deleted session: {session_id}")
+
+
+def delete_all_sessions() -> None:
+    """Delete all conversation history."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM conversation_history")
+    logger.info("Deleted all sessions")
+
+
 def history_to_chat_pairs(rows: List[Tuple[str, str, dict]]) -> List[Tuple[str, str]]:
     pairs: List[Tuple[str, str]] = []
     current_user: Optional[str] = None
@@ -170,16 +207,44 @@ def build_interface():
         Chat with your on-device Ollama model. Conversations persist in PostgreSQL so you can resume anytime.
         """)
 
-        session_state = gr.State(str(uuid.uuid4()))
-        chatbot = gr.Chatbot(label="Conversation", height=400)
-        user_input = gr.Textbox(label="Your message", placeholder="Say something...", autofocus=True)
-        new_session_btn = gr.Button("Start New Session", variant="secondary")
-        metadata_output = gr.Textbox(label="Metadata", lines=8)
+        with gr.Row():
+            with gr.Column(scale=1):
+                gr.Markdown("### Conversation History")
+                session_list = gr.Dropdown(
+                    choices=[],
+                    label="Previous Sessions",
+                    interactive=True
+                )
+                with gr.Row():
+                    refresh_btn = gr.Button("🔄 Refresh", size="sm")
+                    new_session_btn = gr.Button("➕ New", size="sm", variant="primary")
+                with gr.Row():
+                    delete_current_btn = gr.Button("🗑️ Delete Current", size="sm", variant="stop")
+                    delete_all_btn = gr.Button("⚠️ Delete All", size="sm", variant="stop")
+                
+            with gr.Column(scale=3):
+                session_state = gr.State(str(uuid.uuid4()))
+                chatbot = gr.Chatbot(label="Conversation", height=400)
+                user_input = gr.Textbox(label="Your message", placeholder="Say something...", autofocus=True)
+                metadata_output = gr.Textbox(label="Metadata", lines=4)
 
         def load_session(sess_id):
             return load_history(sess_id)
+        
+        def refresh_sessions():
+            sessions = get_all_sessions()
+            choices = [(f"{content[:50]}... ({created_at[:19]})", session_id) 
+                      for session_id, content, created_at in sessions]
+            return gr.update(choices=choices)
+        
+        def switch_session(selected_session_id, current_session_id):
+            if not selected_session_id:
+                return load_history(current_session_id), current_session_id
+            history = load_history(selected_session_id)
+            return history, selected_session_id
 
         demo.load(load_session, inputs=[session_state], outputs=[chatbot])
+        demo.load(refresh_sessions, inputs=None, outputs=[session_list])
 
         user_input.submit(
             handle_chat,
@@ -189,12 +254,46 @@ def build_interface():
 
         def reset_session():
             new_id, empty_history = new_session()
-            return empty_history, "", new_id
+            return empty_history, "", new_id, refresh_sessions()
 
         new_session_btn.click(
             reset_session,
             inputs=None,
-            outputs=[chatbot, user_input, session_state],
+            outputs=[chatbot, user_input, session_state, session_list],
+        )
+        
+        refresh_btn.click(
+            refresh_sessions,
+            inputs=None,
+            outputs=[session_list],
+        )
+        
+        session_list.change(
+            switch_session,
+            inputs=[session_list, session_state],
+            outputs=[chatbot, session_state],
+        )
+        
+        def delete_current_session(current_session_id):
+            delete_session(current_session_id)
+            new_id, empty_history = new_session()
+            return empty_history, "", new_id, refresh_sessions()
+        
+        delete_current_btn.click(
+            delete_current_session,
+            inputs=[session_state],
+            outputs=[chatbot, user_input, session_state, session_list],
+        )
+        
+        def erase_all_conversations():
+            delete_all_sessions()
+            new_id, empty_history = new_session()
+            return empty_history, "", new_id, refresh_sessions()
+        
+        delete_all_btn.click(
+            erase_all_conversations,
+            inputs=None,
+            outputs=[chatbot, user_input, session_state, session_list],
         )
 
     return demo
