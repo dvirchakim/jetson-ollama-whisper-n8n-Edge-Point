@@ -1,0 +1,104 @@
+version: "3.8"
+
+# =============================================================================
+# Jetson Edge AI Point - Docker Compose
+# =============================================================================
+# Services: Ollama (LLM), Whisper (STT), Watchtower (auto-update)
+# Networking: macvlan for dedicated IPs on LAN
+# =============================================================================
+
+networks:
+  edge_macvlan:
+    driver: macvlan
+    driver_opts:
+      parent: ${HOST_INTERFACE:-eth0}
+    ipam:
+      config:
+        - subnet: ${NETWORK_SUBNET:-192.168.1.0/24}
+          gateway: ${NETWORK_GATEWAY:-192.168.1.1}
+          ip_range: ${MACVLAN_IP_RANGE:-192.168.1.240/29}
+
+services:
+  # ---------------------------------------------------------------------------
+  # Ollama - LLM Service with Tool Calling
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - OLLAMA_HOST=0.0.0.0
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_CX_ID=${GOOGLE_CX_ID}
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      edge_macvlan:
+        ipv4_address: ${OLLAMA_IP:-192.168.1.241}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  # ---------------------------------------------------------------------------
+  # Whisper - Speech-to-Text Service
+  # ---------------------------------------------------------------------------
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest-gpu
+    container_name: whisper
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - ASR_MODEL=${WHISPER_MODEL:-base}
+      - ASR_ENGINE=openai_whisper
+    networks:
+      edge_macvlan:
+        ipv4_address: ${WHISPER_IP:-192.168.1.242}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  # ---------------------------------------------------------------------------
+  # Watchtower - Automatic Container Updates
+  # ---------------------------------------------------------------------------
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=${WATCHTOWER_POLL_INTERVAL:-86400}
+      - WATCHTOWER_LABEL_ENABLE=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    network_mode: bridge
+
+volumes:
+  ollama_data:
+    name: ollama_data
