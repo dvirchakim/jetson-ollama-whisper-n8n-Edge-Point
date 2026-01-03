@@ -8,12 +8,12 @@ Deploy **Ollama (LLM)** and **Whisper (Speech-to-Text)** as isolated Docker serv
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐              │
 │  │     Ollama      │  │     Whisper     │  │   Watchtower    │              │
 │  │  (Gemma3 LLM)   │  │  (Speech→Text)  │  │  (Auto-update)  │              │
-│  │  192.168.1.241  │  │  192.168.1.242  │  │     bridge      │              │
+│  │  <OLLAMA_IP>    │  │  <WHISPER_IP>   │  │     bridge      │              │
 │  │    :11434       │  │     :9000       │  │                 │              │
 │  └────────┬────────┘  └────────┬────────┘  └─────────────────┘              │
 │           │                    │                                            │
 │           └────────┬───────────┘                                            │
-│                    │ macvlan (eth0)                                         │
+│                    │ macvlan + bridge                                       │
 └────────────────────┼────────────────────────────────────────────────────────┘
                      │
               ┌──────┴──────┐
@@ -33,7 +33,7 @@ Deploy **Ollama (LLM)** and **Whisper (Speech-to-Text)** as isolated Docker serv
 ## Features
 
 - **Ollama** with `PetrosStav/gemma3-tools:4b` model (tool-calling enabled)
-- **Whisper** speech-to-text API
+- **Whisper** speech-to-text API (faster-whisper with GPU acceleration)
 - **macvlan networking** — each service gets its own LAN IP
 - **Watchtower** for automatic container updates
 - **Single-command install/uninstall** scripts
@@ -46,9 +46,9 @@ Deploy **Ollama (LLM)** and **Whisper (Speech-to-Text)** as isolated Docker serv
 | Component | Requirement |
 |-----------|-------------|
 | Hardware | NVIDIA Jetson AGX Xavier 32GB |
-| Kernel | `Linux 5.15.148-tegra aarch64` |
+| Kernel | `Linux 5.15.148-tegra` or newer (tested on R36.4.4) |
 | Architecture | ARM64 (aarch64) |
-| Network | Ethernet interface (e.g., `eth0`) |
+| Network | Ethernet interface (e.g., `eth0`, `eno1`) |
 | Credentials | Google API Key + Custom Search CX ID (for search tool) |
 
 ---
@@ -75,14 +75,14 @@ Edit the following values:
 # Network interface (check with: ip link show)
 HOST_INTERFACE=eth0
 
-# Your LAN configuration
-NETWORK_SUBNET=192.168.1.0/24
-NETWORK_GATEWAY=192.168.1.1
-MACVLAN_IP_RANGE=192.168.1.240/29
+# Your LAN configuration (adjust to match your network)
+NETWORK_SUBNET=192.168.0.0/24
+NETWORK_GATEWAY=192.168.0.1
+MACVLAN_IP_RANGE=192.168.0.232/29
 
-# Static IPs for services
-OLLAMA_IP=192.168.1.241
-WHISPER_IP=192.168.1.242
+# Static IPs for services (must be within MACVLAN_IP_RANGE)
+OLLAMA_IP=192.168.0.233
+WHISPER_IP=192.168.0.234
 
 # Google Search credentials (for tool-calling)
 GOOGLE_API_KEY=your_api_key_here
@@ -109,21 +109,23 @@ This will:
 # Check container status
 docker ps
 
-# Test Ollama
-curl http://192.168.1.241:11434/api/tags
+# Test Ollama (replace with your OLLAMA_IP)
+curl http://<OLLAMA_IP>:11434/api/tags
 
-# Test Whisper
-curl http://192.168.1.242:9000/
+# Test Whisper (replace with your WHISPER_IP)
+curl http://<WHISPER_IP>:9000/health
 ```
 
 ---
 
 ## Service Endpoints
 
-| Service | IP Address | Port | Endpoint |
-|---------|------------|------|----------|
-| Ollama | `192.168.1.241` | 11434 | `http://192.168.1.241:11434` |
-| Whisper | `192.168.1.242` | 9000 | `http://192.168.1.242:9000` |
+| Service | Port | Endpoint |
+|---------|------|----------|
+| Ollama | 11434 | `http://<OLLAMA_IP>:11434` |
+| Whisper | 9000 | `http://<WHISPER_IP>:9000` |
+
+> Replace `<OLLAMA_IP>` and `<WHISPER_IP>` with the values from your `.env` file.
 
 ---
 
@@ -132,7 +134,7 @@ curl http://192.168.1.242:9000/
 ### Ollama — Chat Completion
 
 ```bash
-curl http://192.168.1.241:11434/api/chat -d '{
+curl http://<OLLAMA_IP>:11434/api/chat -d '{
   "model": "PetrosStav/gemma3-tools:4b",
   "messages": [{"role": "user", "content": "What is the capital of France?"}],
   "stream": false
@@ -142,7 +144,7 @@ curl http://192.168.1.241:11434/api/chat -d '{
 ### Ollama — With Tool Calling
 
 ```bash
-curl http://192.168.1.241:11434/api/chat -d '{
+curl http://<OLLAMA_IP>:11434/api/chat -d '{
   "model": "PetrosStav/gemma3-tools:4b",
   "messages": [{"role": "user", "content": "Search the web for latest AI news"}],
   "tools": [{
@@ -166,7 +168,7 @@ curl http://192.168.1.241:11434/api/chat -d '{
 ### Whisper — Transcribe Audio
 
 ```bash
-curl -X POST http://192.168.1.242:9000/asr \
+curl -X POST http://<WHISPER_IP>:9000/asr \
   -F "audio_file=@recording.wav" \
   -F "output=json"
 ```
@@ -174,10 +176,18 @@ curl -X POST http://192.168.1.242:9000/asr \
 ### Whisper — With Language Hint
 
 ```bash
-curl -X POST http://192.168.1.242:9000/asr \
+curl -X POST http://<WHISPER_IP>:9000/asr \
   -F "audio_file=@recording.wav" \
   -F "language=en" \
   -F "output=json"
+```
+
+### Whisper — OpenAI-Compatible Endpoint
+
+```bash
+curl -X POST http://<WHISPER_IP>:9000/v1/audio/transcriptions \
+  -F "file=@recording.wav" \
+  -F "model=whisper-1"
 ```
 
 ---
@@ -189,7 +199,7 @@ curl -X POST http://192.168.1.242:9000/asr \
 | Field | Value |
 |-------|-------|
 | Method | POST |
-| URL | `http://192.168.1.241:11434/api/chat` |
+| URL | `http://<OLLAMA_IP>:11434/api/chat` |
 | Body Type | JSON |
 | Body | See chat example above |
 
@@ -198,7 +208,7 @@ curl -X POST http://192.168.1.242:9000/asr \
 | Field | Value |
 |-------|-------|
 | Method | POST |
-| URL | `http://192.168.1.242:9000/asr` |
+| URL | `http://<WHISPER_IP>:9000/asr` |
 | Body Type | Form-Data |
 | Body | `audio_file`: Binary data |
 
@@ -220,24 +230,23 @@ curl -X POST http://192.168.1.242:9000/asr \
 ## IP Layout Example
 
 ```
-Network: 192.168.1.0/24
-Gateway: 192.168.1.1
+Example: Network 192.168.0.0/24, Gateway 192.168.0.1
 
 ┌─────────────────────────────────────────────────────┐
-│ DHCP Range: 192.168.1.2 - 192.168.1.239             │
+│ DHCP Range: 192.168.0.2 - 192.168.0.230             │
 │ (Exclude macvlan range from DHCP server)           │
 ├─────────────────────────────────────────────────────┤
-│ macvlan Range: 192.168.1.240/29                     │
-│   .240 - Network (reserved)                         │
-│   .241 - Ollama                                     │
-│   .242 - Whisper                                    │
-│   .243 - (available)                                │
-│   .244 - (available)                                │
-│   .245 - (available)                                │
-│   .246 - (available)                                │
-│   .247 - Broadcast (reserved)                       │
+│ macvlan Range: 192.168.0.232/29                     │
+│   .232 - Network (reserved)                         │
+│   .233 - Ollama                                     │
+│   .234 - Whisper                                    │
+│   .235 - (available)                                │
+│   .236 - (available)                                │
+│   .237 - (available)                                │
+│   .238 - (available)                                │
+│   .239 - Broadcast (reserved)                       │
 ├─────────────────────────────────────────────────────┤
-│ Host shim: 192.168.1.254 (for Jetson→container)    │
+│ Host shim: 192.168.0.254 (for Jetson→container)    │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -252,7 +261,10 @@ jetson-ollama-whisper-n8n-Edge-Point/
 ├── .env                   # Your configuration (git-ignored)
 ├── docker-compose.yml     # Service definitions
 ├── install.sh             # Installation script
-└── uninstall.sh           # Cleanup script
+├── uninstall.sh           # Cleanup script
+└── whisper-service/       # Custom Whisper HTTP API
+    ├── Dockerfile         # ARM64 Jetson-compatible build
+    └── server.py          # FastAPI server with /asr endpoint
 ```
 
 ---
@@ -305,7 +317,7 @@ The macvlan driver isolates containers from the host by default. The install scr
 
 ```bash
 ip link show macvlan-shim
-ip route | grep 192.168.1.241
+ip route | grep <OLLAMA_IP>
 ```
 
 If missing, restart the shim service:
@@ -351,7 +363,7 @@ docker compose logs whisper
 docker exec whisper nvidia-smi
 
 # Test with simple request
-curl -v http://192.168.1.242:9000/
+curl -v http://<WHISPER_IP>:9000/health
 ```
 
 ### Network interface not found
@@ -372,11 +384,15 @@ nano .env
 | Component | Version/Value |
 |-----------|---------------|
 | Hardware | Jetson AGX Xavier 32GB |
+| L4T Release | R36.4.4 |
 | Kernel | `5.15.148-tegra` |
 | Architecture | `aarch64` |
-| JetPack | 5.x |
-| Docker | 24.x+ |
+| JetPack | 6.x |
+| CUDA | 12.6 |
+| Docker | 29.x |
 | Docker Compose | 2.x+ |
+| Whisper Base | `dustynv/faster-whisper:r36.4.0-cu128-24.04` |
+| Ollama | `ollama/ollama:latest` |
 
 ---
 
