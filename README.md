@@ -30,6 +30,14 @@ Deploy **Ollama (LLM)** and **Whisper (Speech-to-Text)** as isolated Docker serv
 
 ---
 
+
+
+
+<img width="1623" height="833" alt="image" src="https://github.com/user-attachments/assets/f12d8f85-8ee5-47d6-b922-da7e6e5c3e77" />
+
+
+<img width="1886" height="795" alt="image" src="https://github.com/user-attachments/assets/0c82f078-59b2-455c-9311-bafe626e1ab5" />
+
 ## Features
 
 - **Ollama** with `PetrosStav/gemma3-tools:4b` model (tool-calling enabled)
