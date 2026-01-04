@@ -248,7 +248,7 @@ Example: Network 192.168.0.0/24, Gateway 192.168.0.1
 │   .232 - Network (reserved)                         │
 │   .233 - Ollama                                     │
 │   .234 - Whisper                                    │
-│   .235 - (available)                                │
+│   .235 - ollama-ui                                │
 │   .236 - (available)                                │
 │   .237 - (available)                                │
 │   .238 - (available)                                │
